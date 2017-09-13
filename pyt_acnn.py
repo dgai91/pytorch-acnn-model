@@ -6,34 +6,6 @@ from sklearn import preprocessing
 import torch.nn.functional as F
 
 
-def l2_normalize(value):
-    array = value.data.numpy()
-    norm = preprocessing.normalize(array, norm='l2')
-    var_norm = Variable(torch.from_numpy(norm), requires_grad=True)
-    return var_norm
-
-
-def tile(value, multiples, axis=1):
-    array = value.data.numpy().astype(float)
-    shape = array.shape
-    if axis == 1:
-        array = array.reshape(shape[0], 1, shape[1])
-    elif axis == 2:
-        array = array.reshape(shape[0], shape[1], 1)
-    elif axis == 0:
-        array = array.reshape(1, shape[0], shape[1])
-    array = array.repeat(multiples, axis)
-    return Variable(torch.FloatTensor(array), requires_grad=True)
-
-
-def triple_dim_mm(mat1, mat2):
-    np_mat1 = mat1.data.numpy()
-    np_mat2 = mat2.data.numpy()
-    mat = np.matmul(np_mat1, np_mat2)
-    torch_mat = Variable(torch.FloatTensor(mat), requires_grad=True)
-    return torch_mat
-
-
 def one_hot(indices, depth, on_value=1, off_value=0):
     np_ids = np.array(indices.data.numpy()).astype(int)
     if len(np_ids.shape) == 2:
@@ -77,7 +49,7 @@ class ACNN(nn.Module):
         self.dropout = nn.Dropout(self.keep_prob)
         self.conv = nn.Conv2d(1, self.dc, (self.k, self.d), (1, self.d), (self.p, 0))
         self.tanh = nn.Tanh()
-        self.U = nn.Parameter(torch.FloatTensor(self.dc, self.nr))
+        self.U = nn.Parameter(torch.randn(self.dc, self.nr))
         self.max_pool = nn.MaxPool2d((1, self.dc), (1, self.dc))
         self.softmax = nn.Softmax()
 
@@ -86,8 +58,8 @@ class ACNN(nn.Module):
         x_embed = self.x_embedding(x)
         e1_embed = self.e1_embedding(e1)
         e2_embed = self.e2_embedding(e2)
-        A1 = triple_dim_mm(x_embed, e1_embed.view(bz, self.dw, 1))
-        A2 = triple_dim_mm(x_embed, e2_embed.view(bz, self.dw, 1))
+        A1 = torch.bmm(x_embed, e1_embed.view(bz, self.dw, 1))
+        A2 = torch.bmm(x_embed, e2_embed.view(bz, self.dw, 1))
         A1 = A1.view(bz, self.n)
         A2 = A2.view(bz, self.n)
         alpha1 = self.softmax(A1)
@@ -104,7 +76,7 @@ class ACNN(nn.Module):
         print(x_concat.data.size())
         R = self.conv(x_concat)
         R = self.tanh(R).view(bz, self.n, self.dc)
-        alpha = tile(alpha, self.dc, 2)
+        alpha = alpha.view(bz, self.n, 1).repeat(1, 1, self.dc)
         R = torch.mul(R, alpha)
         return R  # bz, n, dc
 
@@ -116,7 +88,7 @@ class ACNN(nn.Module):
         G = torch.mm(G, rel_weight)  # (bz*n, dc)
         AP = F.softmax(G)
         AP = AP.view(bz, self.n, self.dc)
-        wo = triple_dim_mm(torch.transpose(R, 2, 1), AP)  # bz, dc, dc
+        wo = torch.bmm(torch.transpose(R, 2, 1), AP)  # bz, dc, dc
         wo = self.max_pool(wo.view(bz, 1, self.dc, self.dc))
         return wo.view(bz, self.dc), rel_weight
 
@@ -134,21 +106,19 @@ class NovelDistanceLoss(nn.Module):
         self.margin = margin
 
     def forward(self, wo, rel_weight, in_y, epsilon=1e-12):
-        wo_norm = l2_normalize(wo)  # (bz, dc)
+        wo_norm = F.normalize(wo)  # (bz, dc)
         bz = wo_norm.data.size()[0]
-        wo_norm_tile = tile(wo_norm, self.nr)  # (bz, nr, dc)
-        batched_rel_w = tile(l2_normalize(rel_weight), wo_norm.data.size()[0], 0)
+        dc = wo_norm.data.size()[1]
+        wo_norm_tile = wo_norm.view(-1, 1, dc).repeat(1, self.nr, 1)  # (bz, nr, dc)
+        batched_rel_w = F.normalize(rel_weight).view(1, self.nr, dc).repeat(bz, 1, 1)
         all_distance = torch.norm(wo_norm_tile - batched_rel_w, 2, 2)  # (bz, nr, 1)
         mask = one_hot(in_y, self.nr, 1000, 0)  # (bz, nr)
         masked_y = torch.add(all_distance.view(bz, self.nr), mask)
-        neg_y = np.argmin(masked_y.data.numpy(), 1).astype(np.int64)  # (bz,)
-        neg_y = Variable(torch.from_numpy(neg_y), requires_grad=True)
+        neg_y = torch.min(masked_y, dim=1)[1]  # (bz,)
         neg_y = torch.mm(one_hot(neg_y, self.nr), rel_weight)  # (bz, nr)*(nr, dc) => (bz, dc)
         pos_y = torch.mm(one_hot(in_y, self.nr), rel_weight)
-        neg_distance = torch.norm(wo_norm - l2_normalize(neg_y), 2, 1)
-        pos_distance = torch.norm(wo_norm - l2_normalize(pos_y), 2, 1)
+        neg_distance = torch.norm(wo_norm - F.normalize(neg_y), 2, 1)
+        pos_distance = torch.norm(wo_norm - F.normalize(pos_y), 2, 1)
         loss = torch.mean(pos_distance + (self.margin - neg_distance))
         print('ok')
         return loss
-
-
