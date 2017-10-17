@@ -15,9 +15,9 @@ NR = 19
 DC = 1000
 KP = 0.6
 K = 3
-LR = 0.25
+LR = 0.2
 BATCH_SIZE = 50
-epochs = 50
+epochs = 100
 data = pro.load_data('/home/dm/adg/remotetest/attention/train.txt')
 t_data = pro.load_data('/home/dm/adg/remotetest/attention/test.txt')
 word_dict = pro.build_dict(data[0])
@@ -92,7 +92,7 @@ for i in range(epochs):
     eval_dataloader = D.DataLoader(eval_datasets, BATCH_SIZE, True, num_workers=2)
     for (b_x_cat, b_y) in eval_dataloader:
         bx, be1, be2, bd1, bd2, by = data_unpack(b_x_cat, b_y)
-        wo, rel_weight = model(bx, be1, be2, bd1, bd2)
+        wo, rel_weight = model(bx, be1, be2, bd1, bd2, False)
         eval_acc += prediction(wo, rel_weight, by, NR)
         ti += 1
     print('epoch:', i, 'acc:', acc / j, '%   loss:', loss.cpu().data.numpy()[0] / j, 'test_acc:', eval_acc / ti, '%')
