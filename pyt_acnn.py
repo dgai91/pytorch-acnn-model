@@ -3,7 +3,6 @@ from torch import nn
 from torch.autograd import Variable
 import numpy as np
 import torch.nn.functional as F
-import attention.data_pro as pro
 
 
 def one_hot(indices, depth, on_value=1, off_value=0):
@@ -26,9 +25,10 @@ def one_hot(indices, depth, on_value=1, off_value=0):
 class ACNN(nn.Module):
     def __init__(self, max_len, embedding, pos_embed_size,
                  pos_embed_num, slide_window, class_num,
-                 num_filters, keep_prob, is_training=True):
+                 num_filters, keep_prob):
         super(ACNN, self).__init__()
         self.dw = embedding.shape[1]
+        self.vac_len = embedding.shape[0]
         self.dp = pos_embed_size
         self.d = self.dw + 2 * self.dp
         self.np = pos_embed_num
@@ -39,11 +39,11 @@ class ACNN(nn.Module):
         self.p = (self.k - 1) // 2
         self.n = max_len
         self.kd = self.d * self.k
-        self.e1_embedding = nn.Embedding(embedding.shape[0], embedding.shape[1])
+        self.e1_embedding = nn.Embedding(self.vac_len, self.dw)
         self.e1_embedding.weight = nn.Parameter(torch.from_numpy(embedding))
-        self.e2_embedding = nn.Embedding(embedding.shape[0], embedding.shape[1])
+        self.e2_embedding = nn.Embedding(self.vac_len, self.dw)
         self.e2_embedding.weight = nn.Parameter(torch.from_numpy(embedding))
-        self.x_embedding = nn.Embedding(embedding.shape[0], embedding.shape[1])
+        self.x_embedding = nn.Embedding(self.vac_len, self.dw)
         self.x_embedding.weight = nn.Parameter(torch.from_numpy(embedding))
         self.dist1_embedding = nn.Embedding(self.np, self.dp)
         self.dist2_embedding = nn.Embedding(self.np, self.dp)
@@ -53,6 +53,8 @@ class ACNN(nn.Module):
         self.conv = nn.Conv2d(1, self.dc, (self.k, self.kd), (1, self.kd), (self.p, 0), bias=True)
         self.tanh = nn.Tanh()
         self.U = nn.Parameter(torch.randn(self.dc, self.nr))
+        self.We1 = nn.Parameter(torch.randn(self.dw, self.dw))
+        self.We2 = nn.Parameter(torch.randn(self.dw, self.dw))
         self.max_pool = nn.MaxPool2d((1, self.dc), (1, self.dc))
         self.softmax = nn.Softmax()
 
@@ -64,17 +66,23 @@ class ACNN(nn.Module):
         b_px = torch.index_select(px, 1, Variable(torch.LongTensor(range(2, s[1] + 2))).cuda())
         return torch.cat([t_px, m_px, b_px], 2)
 
-    def new_input_attention(self, x, e1, e2, dist1, dist2):
+    def new_input_attention(self, x, e1, e2, dist1, dist2, is_training=True):
         bz = x.data.size()[0]
-        x_embed = self.x_embedding(x)
+        x_embed = self.x_embedding(x) # (bz, n, dw)
         e1_embed = self.e1_embedding(e1)
         e2_embed = self.e2_embedding(e2)
         dist1_embed = self.dist1_embedding(dist1)
         dist2_embed = self.dist2_embedding(dist2)
         x_concat = torch.cat((x_embed, dist1_embed, dist2_embed), 2)
         w_concat = self.window_cat(x_concat)
-        A1 = torch.bmm(x_embed, e1_embed.view(bz, self.dw, 1))
-        A2 = torch.bmm(x_embed, e2_embed.view(bz, self.dw, 1))
+        if is_training:
+            w_concat = self.dropout(w_concat)
+        W1 = self.We1.view(1, self.dw, self.dw).repeat(bz, 1, 1)
+        W2 = self.We2.view(1, self.dw, self.dw).repeat(bz, 1, 1)
+        W1x = torch.bmm(x_embed, W1)
+        W2x = torch.bmm(x_embed, W2)
+        A1 = torch.bmm(W1x, e1_embed.view(bz, self.dw, 1))  # (bz, n, 1)
+        A2 = torch.bmm(W2x, e2_embed.view(bz, self.dw, 1))
         A1 = A1.view(bz, self.n)
         A2 = A2.view(bz, self.n)
         alpha1 = self.softmax(A1)
@@ -89,10 +97,10 @@ class ACNN(nn.Module):
         R_star = R.view(s[0], self.dc, s[1])
         return R_star  # bz, dc, n
 
-    def attentive_pooling(self, R_star, y):
-        y_embed = self.y_embedding(y)
-        bz = y_embed.data.size()[0]
+    def attentive_pooling(self, R_star):
         rel_weight = self.y_embedding.weight
+        bz = R_star.data.size()[0]
+
         b_U = self.U.view(1, self.dc, self.nr).repeat(bz, 1, 1)
         b_rel_w = rel_weight.view(1, self.nr, self.dc).repeat(bz, 1, 1)
         G = torch.bmm(R_star.transpose(2, 1), b_U)  # (bz, n, nr)
@@ -103,10 +111,11 @@ class ACNN(nn.Module):
         wo = self.max_pool(wo.view(bz, 1, self.dc, self.dc))
         return wo.view(bz, 1, self.dc).view(bz, self.dc), rel_weight
 
-    def forward(self, x, e1, e2, dist1, dist2, y):
-        R = self.new_input_attention(x, e1, e2, dist1, dist2)
+    def forward(self, x, e1, e2, dist1, dist2, is_training=True):
+        R = self.new_input_attention(x, e1, e2, dist1, dist2, is_training)
         R_star = self.new_convolution(R)
-        wo, rel_weight = self.attentive_pooling(R_star, y)
+        wo, rel_weight = self.attentive_pooling(R_star)
+        wo = F.relu(wo)
         return wo, rel_weight
 
 
@@ -132,5 +141,3 @@ class NovelDistanceLoss(nn.Module):
         pos_distance = torch.norm(wo_norm - F.normalize(pos_y), 2, 1)
         loss = torch.mean(pos_distance + self.margin - neg_distance)
         return loss
-
-
