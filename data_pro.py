@@ -9,7 +9,7 @@ def load_data(file):
     e1_pos = []
     e2_pos = []
 
-    with open(file, 'r') as f:
+    with open(file, 'r', encoding='utf-8', errors='ignore') as f:
         for line in f.readlines():
             line = line.strip().lower().split()
             relations.append(int(line[0]))
@@ -30,6 +30,34 @@ def build_dict(sentences):
     word_dict = {w[0]: index + 1 for (index, w) in enumerate(ls)}
     # leave 0 to PAD
     return word_dict
+
+
+def load_embedding(emb_file, emb_vocab, word_dict):
+    vocab = {}
+    with open(emb_vocab, 'r') as f:
+        for id, w in enumerate(f.readlines()):
+            w = w.strip().lower()
+            vocab[w] = id
+
+    f = open(emb_file, 'r')
+    embed = f.readlines()
+
+    dim = len(embed[0].split())
+    num_words = len(word_dict) + 1
+    embeddings = np.random.uniform(-0.01, 0.01, size=(num_words, dim))
+
+    pre_trained = 0
+    for w in vocab.keys():
+        if w in word_dict:
+            embeddings[word_dict[w]] = [float(x) for x in embed[vocab[w]].split()]
+            pre_trained += 1
+    embeddings[0] = np.zeros(dim)
+
+    logging.info(
+        'embeddings: %.2f%%(pre_trained) unknown: %d' % (pre_trained / num_words * 100, num_words - pre_trained))
+
+    f.close()
+    return embeddings.astype(np.float32)
 
 
 def pos(x):
@@ -60,6 +88,7 @@ def vectorize(data, word_dict, max_len):
     for idx, (sent, pos1, pos2) in enumerate(zip(sentences, e1_pos, e2_pos)):
         vec = [word_dict[w] if w in word_dict else 0 for w in sent]
         sents_vec[idx, :len(vec)] = vec
+
         # # log e1 and e2 if e1 or e2 is a phrase
         # if pos1[0]!=pos1[1] or pos2[0]!=pos2[1]:
         #   s_e1 = ''
