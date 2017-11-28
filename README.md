@@ -8,8 +8,7 @@ You need an environment:
 pytorch 0.2
 
 Git this project to your pycharm or other IDE, then edit the acnn_train.py to satisfied your data
-# 10.17 The Final Version
-Last version have a heavy bug. I repaired it this time. 
-Unfortunately, my model's acc is not as high as the paper's.
+# 11.28 The Renewed Version
+thanks for advice from Di Jin. I revisited the paper and did some modification on my code.
 # Network Structure
 <p align="center"><img width="60%" src="acnn_structure.png" /></p>
