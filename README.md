@@ -10,5 +10,7 @@ pytorch 0.2
 Git this project to your pycharm or other IDE, then edit the acnn_train.py to satisfied your data
 # 11.28 The Renewed Version
 thanks for advice from Di Jin. I revisited the paper and did some modification on my code.
+
+I would do some test when I'm back to work.
 # Network Structure
 <p align="center"><img width="60%" src="acnn_structure.png" /></p>
