@@ -50,7 +50,8 @@ class ACNN(nn.Module):
         self.pad = nn.ConstantPad2d((0, 0, self.p, self.p), 0)
         self.y_embedding = nn.Embedding(self.nr, self.dc)
         self.dropout = nn.Dropout(self.keep_prob)
-        self.conv = nn.Conv2d(1, self.dc, (self.k, self.kd), (1, self.kd), (self.p, 0), bias=True)
+        # self.conv = nn.Conv2d(1, self.dc, (self.k, self.kd), (1, self.kd), (self.p, 0), bias=True)
+        self.conv = nn.Conv2d(1, self.dc, (1, self.kd), (1, self.kd), bias=True)  # renewed
         self.tanh = nn.Tanh()
         self.U = nn.Parameter(torch.randn(self.dc, self.nr))
         self.We1 = nn.Parameter(torch.randn(self.dw, self.dw))
@@ -94,6 +95,7 @@ class ACNN(nn.Module):
     def new_convolution(self, R):
         s = R.data.size()  # bz, n, k*d
         R = self.conv(R.view(s[0], 1, s[1], s[2]))  # bz, dc, n, 1
+        R = self.tanh(R)  # added
         R_star = R.view(s[0], self.dc, s[1])
         return R_star  # bz, dc, n
 
