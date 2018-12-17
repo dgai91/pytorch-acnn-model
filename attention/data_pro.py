@@ -1,9 +1,11 @@
 import numpy as np
 import logging
+import torch
 from collections import Counter
+from keras.utils.np_utils import to_categorical
 
 
-def load_data(file):
+def load_data(file, NR):
     sentences = []
     relations = []
     e1_pos = []
@@ -16,7 +18,7 @@ def load_data(file):
             e1_pos.append((int(line[1]), int(line[2])))  # (start_pos, end_pos)
             e2_pos.append((int(line[3]), int(line[4])))  # (start_pos, end_pos)
             sentences.append(line[5:])
-
+    relations = to_categorical(relations, NR)
     return sentences, relations, e1_pos, e2_pos
 
 
@@ -66,7 +68,7 @@ def pos(x):
     '''
     if x < -60:
         return 0
-    if x >= -60 and x <= 60:
+    if 60 >= x >= -60:
         return x + 61
     if x > 60:
         return 122
@@ -74,48 +76,27 @@ def pos(x):
 
 def vectorize(data, word_dict, max_len):
     sentences, relations, e1_pos, e2_pos = data
-
     # replace word with word-id
-    # sents_vec = []
-    e1_vec = []
-    e2_vec = []
-
+    d1, d2, e1d2, e2d1 = [], [], [], []
+    e1_vec, e2_vec = [], []
     num_data = len(sentences)
+    zd = [0 for _ in range(num_data)]
     sents_vec = np.zeros((num_data, max_len), dtype=int)
-
     logging.debug('data shape: (%d, %d)' % (num_data, max_len))
 
     for idx, (sent, pos1, pos2) in enumerate(zip(sentences, e1_pos, e2_pos)):
         vec = [word_dict[w] if w in word_dict else 0 for w in sent]
         sents_vec[idx, :len(vec)] = vec
-
-        # # log e1 and e2 if e1 or e2 is a phrase
-        # if pos1[0]!=pos1[1] or pos2[0]!=pos2[1]:
-        #   s_e1 = ''
-        #   for w in sent[pos1[0] : pos1[1]+1]:
-        #     s_e1 += w + ' '
-        #   s_e2 = ''
-        #   for w in sent[pos2[0] : pos2[1]+1]:
-        #     s_e2 += w + ' '
-        #   logging.debug("%s - %s" % (s_e1, s_e2))
-
-        # # the entire e1 and e2 phrase
-        # e1_vec.append(vec[pos1[0] : pos1[1]+1])
-        # e2_vec.append(vec[pos2[0] : pos2[1]+1])
-
         # last word of e1 and e2
         e1_vec.append(vec[pos1[1]])
         e2_vec.append(vec[pos2[1]])
 
     # compute relative distance
-    dist1 = []
-    dist2 = []
-
     for sent, p1, p2 in zip(sents_vec, e1_pos, e2_pos):
         # current word position - last word position of e1 or e2
-        dist1.append([pos(p1[1] - idx) for idx, _ in enumerate(sent)])
-        dist2.append([pos(p2[1] - idx) for idx, _ in enumerate(sent)])
+        e1d2.append(pos(p1[1] - p2[1]))
+        e2d1.append(pos(p2[1] - p1[1]))
+        d1.append([pos(p1[1] - idx) for idx, _ in enumerate(sent)])
+        d2.append([pos(p2[1] - idx) for idx, _ in enumerate(sent)])
 
-    return sents_vec, relations, e1_vec, e2_vec, dist1, dist2
-
-
+    return sents_vec, relations, e1_vec, e2_vec, e1d2, e2d1, zd, d1, d2
