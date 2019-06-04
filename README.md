@@ -11,6 +11,6 @@ Git this project to your pycharm or other IDE, then edit the acnn_train.py to sa
 # 18.12.17 The Renewed Version
 These days, I reviewed the paper again and update my code. But the acc is still low.
 
-Could somebody can give me some advice?
+Could somebody give me some advice?
 # Network Structure
 <p align="center"><img width="60%" src="acnn_structure.png" /></p>
